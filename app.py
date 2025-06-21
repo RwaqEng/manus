@@ -1071,3 +1071,7 @@ if __name__ == '__main__':
     # Production deployment uses gunicorn via Procfile
     app.run(host='0.0.0.0', port=5007, debug=False)
 
+
+
+if __name__ == "__main__":
+    app.run(debug=True)
