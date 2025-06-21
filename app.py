@@ -1,0 +1,1073 @@
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
+from flask_mail import Mail, Message
+from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
+import sqlite3
+import os
+from datetime import datetime, timedelta
+import json
+from functools import wraps
+from dotenv import load_dotenv
+import secrets
+import string
+
+# Load environment variables
+load_dotenv()
+
+app = Flask(__name__)
+
+# Load configuration from environment variables
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'rivaq-secret-key-2024-fallback')
+app.config['DATABASE_URL'] = os.getenv('DATABASE_URL', 'sqlite:///rivaq.db')
+app.config['FLASK_ENV'] = os.getenv('FLASK_ENV', 'development')
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv('MAX_CONTENT_LENGTH', 16777216))
+app.config['UPLOAD_FOLDER'] = os.getenv('UPLOAD_FOLDER', 'static/uploads')
+
+# Email configuration
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'True').lower() == 'true'
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME', '')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD', '')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', app.config['MAIL_USERNAME'])
+
+# Initialize Flask-Mail
+mail = Mail(app)
+
+def send_meeting_notification(attendee_emails, meeting_data, notification_type='invitation'):
+    """
+    إرسال إشعارات الاجتماع للحضور
+    notification_type: 'invitation' للدعوة، 'summary' للملخص بعد الاجتماع
+    """
+    try:
+        if notification_type == 'invitation':
+            subject = f"دعوة لحضور اجتماع: {meeting_data['title']}"
+            body = f"""
+            السلام عليكم ورحمة الله وبركاته،
+            
+            تم دعوتكم لحضور الاجتماع التالي:
+            
+            📅 العنوان: {meeting_data['title']}
+            📝 الوصف: {meeting_data.get('description', 'لا يوجد وصف')}
+            🕐 التاريخ والوقت: {meeting_data.get('meeting_date', 'غير محدد')}
+            📍 المكان: {meeting_data.get('location', 'غير محدد')}
+            
+            نموذج GROW:
+            🎯 الهدف: {meeting_data.get('goal', 'غير محدد')}
+            📊 الواقع: {meeting_data.get('reality', 'غير محدد')}
+            🔄 الخيارات: {meeting_data.get('options', 'غير محدد')}
+            ➡️ الطريق للأمام: {meeting_data.get('way_forward', 'غير محدد')}
+            
+            يرجى تأكيد حضوركم.
+            
+            مع تحيات فريق شركة رِواق للاستشارات الهندسية
+            """
+        else:  # summary
+            subject = f"ملخص اجتماع: {meeting_data['title']}"
+            body = f"""
+            السلام عليكم ورحمة الله وبركاته،
+            
+            نشكركم لحضور الاجتماع. إليكم ملخص ما تم مناقشته:
+            
+            📅 عنوان الاجتماع: {meeting_data['title']}
+            🕐 تاريخ الانعقاد: {meeting_data.get('meeting_date', 'غير محدد')}
+            📍 المكان: {meeting_data.get('location', 'غير محدد')}
+            
+            ملخص نموذج GROW:
+            🎯 الهدف المحقق: {meeting_data.get('goal', 'غير محدد')}
+            📊 الواقع المناقش: {meeting_data.get('reality', 'غير محدد')}
+            🔄 الخيارات المطروحة: {meeting_data.get('options', 'غير محدد')}
+            ➡️ الخطوات التالية: {meeting_data.get('way_forward', 'غير محدد')}
+            
+            شكراً لمشاركتكم الفعالة.
+            
+            مع تحيات فريق شركة رِواق للاستشارات الهندسية
+            """
+        
+        # إرسال البريد لكل مشارك
+        for email in attendee_emails:
+            if email:  # التأكد من وجود البريد الإلكتروني
+                msg = Message(
+                    subject=subject,
+                    recipients=[email],
+                    body=body
+                )
+                mail.send(msg)
+        
+        return True
+    except Exception as e:
+        print(f"خطأ في إرسال الإشعارات: {str(e)}")
+        return False
+
+def get_attendee_emails(attendee_ids):
+    """جلب بريد المشاركين من قاعدة البيانات"""
+    try:
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        emails = []
+        for attendee_id in attendee_ids.split(','):
+            if attendee_id.strip():
+                cursor.execute('SELECT email FROM users WHERE id = ?', (attendee_id.strip(),))
+                result = cursor.fetchone()
+                if result:
+                    emails.append(result[0])
+        
+        conn.close()
+        return emails
+    except Exception as e:
+        print(f"خطأ في جلب بريد المشاركين: {str(e)}")
+        return []
+
+# Database initialization
+def init_db():
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    # Users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            position TEXT NOT NULL,
+            department TEXT NOT NULL,
+            join_date DATE,
+            manager_id INTEGER,
+            permissions TEXT,
+            profile_image TEXT,
+            reset_token TEXT,
+            reset_token_expires TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (manager_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Tasks table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            assigned_to INTEGER,
+            created_by INTEGER,
+            priority TEXT DEFAULT 'متوسطة',
+            status TEXT DEFAULT 'جديدة',
+            progress INTEGER DEFAULT 0,
+            due_date DATE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (assigned_to) REFERENCES users (id),
+            FOREIGN KEY (created_by) REFERENCES users (id)
+        )
+    ''')
+    
+    # Meetings table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS meetings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            meeting_date DATETIME,
+            location TEXT,
+            organizer_id INTEGER,
+            goal TEXT,
+            reality TEXT,
+            options TEXT,
+            way_forward TEXT,
+            attendees TEXT,
+            status TEXT DEFAULT 'مجدولة',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (organizer_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Meeting outputs table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS meeting_outputs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            meeting_id INTEGER,
+            output_type TEXT,
+            content TEXT,
+            responsible_person INTEGER,
+            due_date DATE,
+            status TEXT DEFAULT 'جديدة',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (meeting_id) REFERENCES meetings (id),
+            FOREIGN KEY (responsible_person) REFERENCES users (id)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Authentication decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# Routes
+@app.route('/')
+def index():
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
+        user = cursor.fetchone()
+        conn.close()
+        
+        if user and check_password_hash(user[3], password):
+            session['user_id'] = user[0]
+            session['user_name'] = user[1]
+            session['user_email'] = user[2]
+            session['user_position'] = user[4]
+            session['user_department'] = user[5]
+            return redirect(url_for('dashboard'))
+        else:
+            flash('بيانات الدخول غير صحيحة', 'error')
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('تم تسجيل الخروج بنجاح', 'success')
+    return redirect(url_for('login'))
+
+# Password Reset Routes
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if request.method == 'POST':
+        email = request.form['email']
+        
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM users WHERE email = ?', (email,))
+        user = cursor.fetchone()
+        
+        if user:
+            # Generate reset token
+            reset_token = generate_reset_token()
+            expires = datetime.now() + timedelta(hours=1)
+            
+            # Update user with reset token
+            cursor.execute('''
+                UPDATE users 
+                SET reset_token = ?, reset_token_expires = ? 
+                WHERE email = ?
+            ''', (reset_token, expires, email))
+            conn.commit()
+            
+            # Send reset email
+            try:
+                send_password_reset_email(user[2], user[1], reset_token)
+                flash('تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني', 'success')
+            except Exception as e:
+                flash('حدث خطأ في إرسال البريد الإلكتروني. يرجى المحاولة مرة أخرى', 'error')
+        else:
+            flash('البريد الإلكتروني غير مسجل في النظام', 'error')
+        
+        conn.close()
+        return redirect(url_for('forgot_password'))
+    
+    return render_template('forgot_password.html')
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    # Check if token is valid and not expired
+    cursor.execute('''
+        SELECT * FROM users 
+        WHERE reset_token = ? AND reset_token_expires > datetime("now")
+    ''', (token,))
+    user = cursor.fetchone()
+    
+    if not user:
+        flash('رابط إعادة تعيين كلمة المرور غير صالح أو منتهي الصلاحية', 'error')
+        conn.close()
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        new_password = request.form['password']
+        confirm_password = request.form['confirm_password']
+        
+        if new_password != confirm_password:
+            flash('كلمات المرور غير متطابقة', 'error')
+            return render_template('reset_password.html', token=token)
+        
+        if len(new_password) < 6:
+            flash('كلمة المرور يجب أن تكون 6 أحرف على الأقل', 'error')
+            return render_template('reset_password.html', token=token)
+        
+        # Update password and clear reset token
+        hashed_password = generate_password_hash(new_password)
+        cursor.execute('''
+            UPDATE users 
+            SET password = ?, reset_token = NULL, reset_token_expires = NULL 
+            WHERE id = ?
+        ''', (hashed_password, user[0]))
+        conn.commit()
+        conn.close()
+        
+        flash('تم تغيير كلمة المرور بنجاح. يمكنك الآن تسجيل الدخول', 'success')
+        return redirect(url_for('login'))
+    
+    conn.close()
+    return render_template('reset_password.html', token=token)
+
+# Email Functions
+def generate_reset_token():
+    """Generate a secure random token for password reset"""
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(32))
+
+def send_password_reset_email(email, name, token):
+    """Send password reset email"""
+    reset_url = url_for('reset_password', token=token, _external=True)
+    
+    msg = Message(
+        subject='إعادة تعيين كلمة المرور - نظام إدارة المهام',
+        recipients=[email],
+        html=render_template('emails/password_reset.html', 
+                           name=name, reset_url=reset_url),
+        body=f'''
+مرحباً {name},
+
+تم طلب إعادة تعيين كلمة المرور لحسابك في نظام إدارة المهام.
+
+للمتابعة، يرجى النقر على الرابط التالي:
+{reset_url}
+
+هذا الرابط صالح لمدة ساعة واحدة فقط.
+
+إذا لم تطلب إعادة تعيين كلمة المرور، يرجى تجاهل هذه الرسالة.
+
+مع تحيات فريق شركة رِواق
+        '''
+    )
+    
+    mail.send(msg)
+
+def send_notification_email(email, subject, message):
+    """Send general notification email"""
+    msg = Message(
+        subject=subject,
+        recipients=[email],
+        body=message
+    )
+    mail.send(msg)
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    # Get statistics
+    cursor.execute('SELECT COUNT(*) FROM tasks')
+    total_tasks = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM tasks WHERE status = "مكتملة"')
+    completed_tasks = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM tasks WHERE status = "قيد التنفيذ"')
+    in_progress_tasks = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM meetings WHERE meeting_date >= date("now")')
+    upcoming_meetings = cursor.fetchone()[0]
+    
+    # Get recent tasks
+    cursor.execute('''
+        SELECT t.*, u.name as assigned_name 
+        FROM tasks t 
+        LEFT JOIN users u ON t.assigned_to = u.id 
+        ORDER BY t.created_at DESC 
+        LIMIT 5
+    ''')
+    recent_tasks = cursor.fetchall()
+    
+    # Get upcoming meetings
+    cursor.execute('''
+        SELECT m.*, u.name as organizer_name 
+        FROM meetings m 
+        LEFT JOIN users u ON m.organizer_id = u.id 
+        WHERE m.meeting_date >= datetime("now") 
+        ORDER BY m.meeting_date ASC 
+        LIMIT 3
+    ''')
+    upcoming_meetings_list = cursor.fetchall()
+    
+    conn.close()
+    
+    return render_template('dashboard.html', 
+                         total_tasks=total_tasks,
+                         completed_tasks=completed_tasks,
+                         in_progress_tasks=in_progress_tasks,
+                         upcoming_meetings=upcoming_meetings,
+                         recent_tasks=recent_tasks,
+                         upcoming_meetings_list=upcoming_meetings_list)
+
+@app.route('/tasks')
+@login_required
+def tasks():
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT t.*, u.name as assigned_name, c.name as creator_name
+        FROM tasks t 
+        LEFT JOIN users u ON t.assigned_to = u.id 
+        LEFT JOIN users c ON t.created_by = c.id 
+        ORDER BY t.created_at DESC
+    ''')
+    tasks_list = cursor.fetchall()
+    
+    cursor.execute('SELECT id, name FROM users')
+    users_list = cursor.fetchall()
+    
+    conn.close()
+    
+    return render_template('tasks.html', tasks=tasks_list, users=users_list)
+
+@app.route('/users')
+@login_required
+def users():
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT u.*, m.name as manager_name 
+        FROM users u 
+        LEFT JOIN users m ON u.manager_id = m.id 
+        ORDER BY u.name
+    ''')
+    users_list = cursor.fetchall()
+    
+    conn.close()
+    
+    return render_template('users.html', users=users_list)
+
+@app.route('/meetings')
+@login_required
+def meetings():
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT m.*, u.name as organizer_name 
+        FROM meetings m 
+        LEFT JOIN users u ON m.organizer_id = u.id 
+        ORDER BY m.meeting_date DESC
+    ''')
+    meetings_list = cursor.fetchall()
+    
+    cursor.execute('SELECT id, name FROM users')
+    users_list = cursor.fetchall()
+    
+    conn.close()
+    
+    return render_template('meetings.html', meetings=meetings_list, users=users_list)
+
+@app.route('/reports')
+@login_required
+def reports():
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    # إحصائيات عامة
+    cursor.execute('SELECT COUNT(*) FROM tasks')
+    total_tasks = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM tasks WHERE status = "مكتملة"')
+    completed_tasks = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM users')
+    total_users = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM meetings')
+    total_meetings = cursor.fetchone()[0]
+    
+    # إحصائيات المهام حسب الحالة
+    cursor.execute('SELECT COUNT(*) FROM tasks WHERE status = "جديدة"')
+    new_tasks = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM tasks WHERE status = "قيد التنفيذ"')
+    in_progress_tasks = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM tasks WHERE status = "معلقة"')
+    pending_tasks = cursor.fetchone()[0]
+    
+    # إحصائيات المهام حسب الأولوية
+    cursor.execute('SELECT COUNT(*) FROM tasks WHERE priority = "عالية"')
+    high_priority = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM tasks WHERE priority = "متوسطة"')
+    medium_priority = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM tasks WHERE priority = "منخفضة"')
+    low_priority = cursor.fetchone()[0]
+    
+    # إحصائيات الاجتماعات
+    cursor.execute('SELECT COUNT(*) FROM meetings WHERE status = "مجدولة"')
+    scheduled_meetings = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM meetings WHERE status = "مكتملة"')
+    completed_meetings = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(*) FROM meetings WHERE status = "ملغية"')
+    cancelled_meetings = cursor.fetchone()[0]
+    
+    # أداء المستخدمين
+    cursor.execute('''
+        SELECT u.name, u.position, 
+               COUNT(t.id) as total_tasks,
+               COUNT(CASE WHEN t.status = "مكتملة" THEN 1 END) as completed_tasks
+        FROM users u 
+        LEFT JOIN tasks t ON u.id = t.assigned_to 
+        GROUP BY u.id, u.name, u.position
+    ''')
+    users_data = cursor.fetchall()
+    
+    users_performance = []
+    for user in users_data:
+        completion_rate = (user[3] / user[2] * 100) if user[2] > 0 else 0
+        users_performance.append({
+            'name': user[0],
+            'position': user[1],
+            'total_tasks': user[2],
+            'completed_tasks': user[3],
+            'completion_rate': round(completion_rate, 1)
+        })
+    
+    # إحصائيات إضافية
+    overdue_tasks = 0  # يمكن حسابها بناءً على due_date
+    overdue_percentage = (overdue_tasks / total_tasks * 100) if total_tasks > 0 else 0
+    average_completion_time = 7  # متوسط افتراضي
+    
+    conn.close()
+    
+    return render_template('reports.html', 
+                         total_tasks=total_tasks,
+                         completed_tasks=completed_tasks,
+                         total_users=total_users,
+                         total_meetings=total_meetings,
+                         new_tasks=new_tasks,
+                         in_progress_tasks=in_progress_tasks,
+                         pending_tasks=pending_tasks,
+                         high_priority=high_priority,
+                         medium_priority=medium_priority,
+                         low_priority=low_priority,
+                         scheduled_meetings=scheduled_meetings,
+                         completed_meetings=completed_meetings,
+                         cancelled_meetings=cancelled_meetings,
+                         users_performance=users_performance,
+                         overdue_tasks=overdue_tasks,
+                         overdue_percentage=overdue_percentage,
+                         average_completion_time=average_completion_time)
+
+@app.route('/profile')
+@login_required
+def profile():
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],))
+    user = cursor.fetchone()
+    
+    cursor.execute('SELECT id, name FROM users WHERE id != ?', (session['user_id'],))
+    managers_list = cursor.fetchall()
+    
+    conn.close()
+    
+    return render_template('profile.html', user=user, managers=managers_list)
+
+# API Routes
+@app.route('/api/tasks', methods=['POST'])
+@login_required
+def create_task():
+    data = request.get_json()
+    
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        INSERT INTO tasks (title, description, assigned_to, created_by, priority, due_date)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (data['title'], data['description'], data['assigned_to'], 
+          session['user_id'], data['priority'], data['due_date']))
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True, 'message': 'تم إنشاء المهمة بنجاح'})
+
+@app.route('/api/tasks/<int:task_id>', methods=['GET'])
+@login_required
+def get_task(task_id):
+    try:
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, title, description, assigned_to, priority, status, progress, due_date
+            FROM tasks WHERE id = ?
+        ''', (task_id,))
+        
+        task = cursor.fetchone()
+        conn.close()
+        
+        if not task:
+            return jsonify({'success': False, 'message': 'المهمة غير موجودة'})
+        
+        task_data = {
+            'id': task[0],
+            'title': task[1],
+            'description': task[2],
+            'assigned_to': task[3],
+            'priority': task[4],
+            'status': task[5],
+            'progress': task[6],
+            'due_date': task[7]
+        }
+        
+        return jsonify({'success': True, 'task': task_data})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/tasks/<int:task_id>', methods=['PUT'])
+@login_required
+def update_task(task_id):
+    try:
+        # التعامل مع FormData بدلاً من JSON
+        title = request.form.get('title')
+        description = request.form.get('description')
+        assigned_to = request.form.get('assigned_to')
+        priority = request.form.get('priority')
+        status = request.form.get('status')
+        progress = request.form.get('progress', 0)
+        due_date = request.form.get('due_date')
+        
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE tasks 
+            SET title=?, description=?, assigned_to=?, priority=?, status=?, progress=?, due_date=?, updated_at=?
+            WHERE id=?
+        ''', (title, description, assigned_to, priority, status, progress, 
+              due_date, datetime.now(), task_id))
+        
+        if cursor.rowcount == 0:
+            return jsonify({'success': False, 'message': 'المهمة غير موجودة'})
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'تم تحديث المهمة بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/meetings', methods=['POST'])
+@login_required
+def create_meeting():
+    try:
+        # التعامل مع FormData بدلاً من JSON
+        title = request.form.get('title')
+        description = request.form.get('description')
+        meeting_date = request.form.get('meeting_date')
+        location = request.form.get('location')
+        goal = request.form.get('goal')
+        reality = request.form.get('reality')
+        options = request.form.get('options')
+        way_forward = request.form.get('way_forward')
+        attendees = request.form.get('attendees', '[]')  # افتراضي قائمة فارغة
+        
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO meetings (title, description, meeting_date, location, organizer_id, 
+                                goal, reality, options, way_forward, attendees)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (title, description, meeting_date, location, session['user_id'], 
+              goal, reality, options, way_forward, attendees))
+        
+        conn.commit()
+        conn.close()
+        
+        # إرسال إشعارات للحضور
+        if attendees and attendees != '[]':
+            meeting_data = {
+                'title': title,
+                'description': description,
+                'meeting_date': meeting_date,
+                'location': location,
+                'goal': goal,
+                'reality': reality,
+                'options': options,
+                'way_forward': way_forward
+            }
+            
+            attendee_emails = get_attendee_emails(attendees)
+            if attendee_emails:
+                send_meeting_notification(attendee_emails, meeting_data, 'invitation')
+        
+        return jsonify({'success': True, 'message': 'تم إنشاء الاجتماع وإرسال الإشعارات بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+@app.route('/api/users', methods=['POST'])
+@login_required
+def create_user():
+    try:
+        # التعامل مع FormData بدلاً من JSON
+        name = request.form.get('name')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        position = request.form.get('position')
+        department = request.form.get('department')
+        join_date = request.form.get('join_date')
+        manager_id = request.form.get('manager_id')
+        permissions = request.form.get('permissions', '[]')
+        
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        hashed_password = generate_password_hash(password)
+        
+        cursor.execute('''
+            INSERT INTO users (name, email, password, position, department, join_date, manager_id, permissions)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (name, email, hashed_password, position, department, join_date, 
+              manager_id if manager_id else None, permissions))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'تم إنشاء المستخدم بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+# Get single user
+@app.route('/api/users/<int:user_id>', methods=['GET'])
+@login_required
+def get_user(user_id):
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+    user = cursor.fetchone()
+    
+    conn.close()
+    
+    if user:
+        user_data = {
+            'id': user[0],
+            'name': user[1],
+            'email': user[2],
+            'position': user[4],
+            'department': user[5],
+            'join_date': user[6],
+            'manager_id': user[7]
+        }
+        return jsonify({'success': True, 'user': user_data})
+    else:
+        return jsonify({'success': False, 'message': 'المستخدم غير موجود'})
+
+# Update user
+@app.route('/api/users/<int:user_id>', methods=['PUT'])
+@login_required
+def update_user(user_id):
+    try:
+        name = request.form.get('name')
+        email = request.form.get('email')
+        position = request.form.get('position')
+        department = request.form.get('department')
+        manager_id = request.form.get('manager_id')
+        
+        # معالجة manager_id إذا كان فارغاً أو None
+        if manager_id == '' or manager_id == 'null' or manager_id is None:
+            manager_id = None
+        else:
+            try:
+                manager_id = int(manager_id)
+            except (ValueError, TypeError):
+                manager_id = None
+        
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE users 
+            SET name = ?, email = ?, position = ?, department = ?, manager_id = ?
+            WHERE id = ?
+        ''', (name, email, position, department, manager_id, user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'تم تحديث المستخدم بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+# Delete user
+@app.route('/api/users/<int:user_id>', methods=['DELETE'])
+@login_required
+def delete_user(user_id):
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True, 'message': 'تم حذف المستخدم بنجاح'})
+
+@app.route('/api/profile', methods=['PUT'])
+@login_required
+def update_profile():
+    try:
+        # التعامل مع FormData بدلاً من JSON
+        name = request.form.get('name')
+        position = request.form.get('position')
+        department = request.form.get('department')
+        join_date = request.form.get('join_date')
+        manager_id = request.form.get('manager_id')
+        
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE users 
+            SET name=?, position=?, department=?, join_date=?, manager_id=?
+            WHERE id=?
+        ''', (name, position, department, join_date, 
+              manager_id if manager_id else None, session['user_id']))
+        
+        if cursor.rowcount == 0:
+            return jsonify({'success': False, 'message': 'المستخدم غير موجود'})
+        
+        # Update session data
+        session['user_name'] = name
+        session['user_position'] = position
+        session['user_department'] = department
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'تم تحديث الملف الشخصي بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+# Delete task
+@app.route('/api/tasks/<int:task_id>', methods=['DELETE'])
+@login_required
+def delete_task(task_id):
+    try:
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+        
+        if cursor.rowcount == 0:
+            return jsonify({'success': False, 'message': 'المهمة غير موجودة'})
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'تم حذف المهمة بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+# Get single meeting
+@app.route('/api/meetings/<int:meeting_id>', methods=['GET'])
+@login_required
+def get_meeting(meeting_id):
+    conn = sqlite3.connect('rivaq.db')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM meetings WHERE id = ?', (meeting_id,))
+    meeting = cursor.fetchone()
+    
+    conn.close()
+    
+    if meeting:
+        meeting_data = {
+            'id': meeting[0],
+            'title': meeting[1],
+            'description': meeting[2],
+            'meeting_date': meeting[3],
+            'location': meeting[4],
+            'organizer_id': meeting[5],
+            'goal': meeting[6],
+            'reality': meeting[7],
+            'options': meeting[8],
+            'way_forward': meeting[9],
+            'attendees': meeting[10],
+            'status': meeting[11]
+        }
+        return jsonify({'success': True, 'meeting': meeting_data})
+    else:
+        return jsonify({'success': False, 'message': 'الاجتماع غير موجود'})
+
+# Delete meeting
+@app.route('/api/meetings/<int:meeting_id>', methods=['DELETE'])
+@login_required
+def delete_meeting(meeting_id):
+    try:
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM meetings WHERE id = ?', (meeting_id,))
+        
+        if cursor.rowcount == 0:
+            return jsonify({'success': False, 'message': 'الاجتماع غير موجود'})
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'تم حذف الاجتماع بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+# Edit meeting
+@app.route('/api/meetings/<int:meeting_id>', methods=['PUT'])
+@login_required
+def edit_meeting(meeting_id):
+    try:
+        # التعامل مع FormData بدلاً من JSON
+        title = request.form.get('title')
+        description = request.form.get('description')
+        meeting_date = request.form.get('meeting_date')
+        location = request.form.get('location')
+        goal = request.form.get('goal')
+        reality = request.form.get('reality')
+        options = request.form.get('options')
+        way_forward = request.form.get('way_forward')
+        attendees = request.form.get('attendees')
+        
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE meetings 
+            SET title=?, description=?, meeting_date=?, location=?, 
+                goal=?, reality=?, options=?, way_forward=?, attendees=?
+            WHERE id=?
+        ''', (title, description, meeting_date, location, 
+              goal, reality, options, way_forward, attendees, meeting_id))
+        
+        if cursor.rowcount == 0:
+            return jsonify({'success': False, 'message': 'الاجتماع غير موجود'})
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'تم تحديث الاجتماع بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+# إرسال ملخص الاجتماع
+@app.route('/api/meetings/<int:meeting_id>/send-summary', methods=['POST'])
+@login_required
+def send_meeting_summary(meeting_id):
+    try:
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        # جلب بيانات الاجتماع
+        cursor.execute('SELECT * FROM meetings WHERE id = ?', (meeting_id,))
+        meeting = cursor.fetchone()
+        
+        if not meeting:
+            return jsonify({'success': False, 'message': 'الاجتماع غير موجود'})
+        
+        meeting_data = {
+            'title': meeting[1],
+            'description': meeting[2],
+            'meeting_date': meeting[3],
+            'location': meeting[4],
+            'goal': meeting[6],
+            'reality': meeting[7],
+            'options': meeting[8],
+            'way_forward': meeting[9]
+        }
+        
+        # جلب بريد الحضور وإرسال الملخص
+        attendees = meeting[10]  # attendees column
+        if attendees:
+            attendee_emails = get_attendee_emails(attendees)
+            if attendee_emails:
+                success = send_meeting_notification(attendee_emails, meeting_data, 'summary')
+                if success:
+                    # تحديث حالة الاجتماع إلى مكتملة
+                    cursor.execute('UPDATE meetings SET status = ? WHERE id = ?', ('مكتملة', meeting_id))
+                    conn.commit()
+                    conn.close()
+                    return jsonify({'success': True, 'message': 'تم إرسال ملخص الاجتماع بنجاح'})
+                else:
+                    conn.close()
+                    return jsonify({'success': False, 'message': 'فشل في إرسال الملخص'})
+            else:
+                conn.close()
+                return jsonify({'success': False, 'message': 'لا توجد عناوين بريد إلكتروني للحضور'})
+        else:
+            conn.close()
+            return jsonify({'success': False, 'message': 'لا يوجد حضور مسجل للاجتماع'})
+            
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+# Change password
+@app.route('/api/change-password', methods=['POST'])
+@login_required
+def change_password():
+    try:
+        current_password = request.form.get('current_password')
+        new_password = request.form.get('new_password')
+        
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        
+        # Verify current password
+        cursor.execute('SELECT password FROM users WHERE id = ?', (session['user_id'],))
+        user = cursor.fetchone()
+        
+        if not user or not check_password_hash(user[0], current_password):
+            return jsonify({'success': False, 'message': 'كلمة المرور الحالية غير صحيحة'})
+        
+        # Update password
+        hashed_password = generate_password_hash(new_password)
+        cursor.execute('UPDATE users SET password = ? WHERE id = ?', 
+                      (hashed_password, session['user_id']))
+        
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'success': True, 'message': 'تم تغيير كلمة المرور بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+if __name__ == '__main__':
+    init_db()
+    # For development only - remove in production
+    # Production deployment uses gunicorn via Procfile
+    app.run(host='0.0.0.0', port=5007, debug=False)
+
