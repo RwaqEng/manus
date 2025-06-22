@@ -855,4 +855,4 @@ def delete_user(user_id):
     
     return jsonify({'success': True, 'message': 'تم حذف المستخدم بنجاح'})
 
-@app.route('/api/profile
+@app.route('/api/profile')
