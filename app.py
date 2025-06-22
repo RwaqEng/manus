@@ -106,12 +106,14 @@ def get_attendee_emails(attendee_ids):
         cursor = conn.cursor()
         
         emails = []
-        for attendee_id in attendee_ids.split(','):
-            if attendee_id.strip():
-                cursor.execute('SELECT email FROM users WHERE id = ?', (attendee_id.strip(),))
-                result = cursor.fetchone()
-                if result:
-                    emails.append(result[0])
+        # Ensure attendee_ids is treated as a string of comma-separated IDs
+        if isinstance(attendee_ids, str):
+            for attendee_id in attendee_ids.split(','):
+                if attendee_id.strip():
+                    cursor.execute('SELECT email FROM users WHERE id = ?', (attendee_id.strip(),))
+                    result = cursor.fetchone()
+                    if result:
+                        emails.append(result[0])
         
         conn.close()
         return emails
@@ -459,9 +461,13 @@ def users():
     ''')
     users_list = cursor.fetchall()
     
+    # Fetch all users to populate the manager dropdown in the Add/Edit User modal
+    cursor.execute('SELECT id, name FROM users ORDER BY name')
+    managers_list = cursor.fetchall()
+    
     conn.close()
     
-    return render_template('users.html', users=users_list)
+    return render_template('users.html', users=users_list, managers=managers_list)
 
 @app.route('/meetings')
 @login_required
@@ -696,7 +702,7 @@ def create_meeting():
         reality = request.form.get('reality')
         options = request.form.get('options')
         way_forward = request.form.get('way_forward')
-        attendees = request.form.get('attendees', '[]')  # افتراضي قائمة فارغة
+        attendees = request.form.get('attendees', '')  # افتراضي سلسلة فارغة
         
         conn = sqlite3.connect('rivaq.db')
         cursor = conn.cursor()
@@ -712,7 +718,7 @@ def create_meeting():
         conn.close()
         
         # إرسال إشعارات للحضور
-        if attendees and attendees != '[]':
+        if attendees: # Check if attendees string is not empty
             meeting_data = {
                 'title': title,
                 'description': description,
@@ -751,11 +757,20 @@ def create_user():
         
         hashed_password = generate_password_hash(password)
         
+        # Handle manager_id being an empty string or 'null'
+        if manager_id == '' or manager_id == 'null':
+            manager_id = None
+        else:
+            try:
+                manager_id = int(manager_id)
+            except ValueError:
+                manager_id = None # Fallback if conversion fails
+        
         cursor.execute('''
             INSERT INTO users (name, email, password, position, department, join_date, manager_id, permissions)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (name, email, hashed_password, position, department, join_date, 
-              manager_id if manager_id else None, permissions))
+              manager_id, permissions))
         
         conn.commit()
         conn.close()
@@ -840,238 +855,4 @@ def delete_user(user_id):
     
     return jsonify({'success': True, 'message': 'تم حذف المستخدم بنجاح'})
 
-@app.route('/api/profile', methods=['PUT'])
-@login_required
-def update_profile():
-    try:
-        # التعامل مع FormData بدلاً من JSON
-        name = request.form.get('name')
-        position = request.form.get('position')
-        department = request.form.get('department')
-        join_date = request.form.get('join_date')
-        manager_id = request.form.get('manager_id')
-        
-        conn = sqlite3.connect('rivaq.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE users 
-            SET name=?, position=?, department=?, join_date=?, manager_id=?
-            WHERE id=?
-        ''', (name, position, department, join_date, 
-              manager_id if manager_id else None, session['user_id']))
-        
-        if cursor.rowcount == 0:
-            return jsonify({'success': False, 'message': 'المستخدم غير موجود'})
-        
-        # Update session data
-        session['user_name'] = name
-        session['user_position'] = position
-        session['user_department'] = department
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'message': 'تم تحديث الملف الشخصي بنجاح'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-# Delete task
-@app.route('/api/tasks/<int:task_id>', methods=['DELETE'])
-@login_required
-def delete_task(task_id):
-    try:
-        conn = sqlite3.connect('rivaq.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
-        
-        if cursor.rowcount == 0:
-            return jsonify({'success': False, 'message': 'المهمة غير موجودة'})
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'message': 'تم حذف المهمة بنجاح'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-# Get single meeting
-@app.route('/api/meetings/<int:meeting_id>', methods=['GET'])
-@login_required
-def get_meeting(meeting_id):
-    conn = sqlite3.connect('rivaq.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM meetings WHERE id = ?', (meeting_id,))
-    meeting = cursor.fetchone()
-    
-    conn.close()
-    
-    if meeting:
-        meeting_data = {
-            'id': meeting[0],
-            'title': meeting[1],
-            'description': meeting[2],
-            'meeting_date': meeting[3],
-            'location': meeting[4],
-            'organizer_id': meeting[5],
-            'goal': meeting[6],
-            'reality': meeting[7],
-            'options': meeting[8],
-            'way_forward': meeting[9],
-            'attendees': meeting[10],
-            'status': meeting[11]
-        }
-        return jsonify({'success': True, 'meeting': meeting_data})
-    else:
-        return jsonify({'success': False, 'message': 'الاجتماع غير موجود'})
-
-# Delete meeting
-@app.route('/api/meetings/<int:meeting_id>', methods=['DELETE'])
-@login_required
-def delete_meeting(meeting_id):
-    try:
-        conn = sqlite3.connect('rivaq.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('DELETE FROM meetings WHERE id = ?', (meeting_id,))
-        
-        if cursor.rowcount == 0:
-            return jsonify({'success': False, 'message': 'الاجتماع غير موجود'})
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'message': 'تم حذف الاجتماع بنجاح'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-# Edit meeting
-@app.route('/api/meetings/<int:meeting_id>', methods=['PUT'])
-@login_required
-def edit_meeting(meeting_id):
-    try:
-        # التعامل مع FormData بدلاً من JSON
-        title = request.form.get('title')
-        description = request.form.get('description')
-        meeting_date = request.form.get('meeting_date')
-        location = request.form.get('location')
-        goal = request.form.get('goal')
-        reality = request.form.get('reality')
-        options = request.form.get('options')
-        way_forward = request.form.get('way_forward')
-        attendees = request.form.get('attendees')
-        
-        conn = sqlite3.connect('rivaq.db')
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE meetings 
-            SET title=?, description=?, meeting_date=?, location=?, 
-                goal=?, reality=?, options=?, way_forward=?, attendees=?
-            WHERE id=?
-        ''', (title, description, meeting_date, location, 
-              goal, reality, options, way_forward, attendees, meeting_id))
-        
-        if cursor.rowcount == 0:
-            return jsonify({'success': False, 'message': 'الاجتماع غير موجود'})
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'message': 'تم تحديث الاجتماع بنجاح'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-# إرسال ملخص الاجتماع
-@app.route('/api/meetings/<int:meeting_id>/send-summary', methods=['POST'])
-@login_required
-def send_meeting_summary(meeting_id):
-    try:
-        conn = sqlite3.connect('rivaq.db')
-        cursor = conn.cursor()
-        
-        # جلب بيانات الاجتماع
-        cursor.execute('SELECT * FROM meetings WHERE id = ?', (meeting_id,))
-        meeting = cursor.fetchone()
-        
-        if not meeting:
-            return jsonify({'success': False, 'message': 'الاجتماع غير موجود'})
-        
-        meeting_data = {
-            'title': meeting[1],
-            'description': meeting[2],
-            'meeting_date': meeting[3],
-            'location': meeting[4],
-            'goal': meeting[6],
-            'reality': meeting[7],
-            'options': meeting[8],
-            'way_forward': meeting[9]
-        }
-        
-        # جلب بريد الحضور وإرسال الملخص
-        attendees = meeting[10]  # attendees column
-        if attendees:
-            attendee_emails = get_attendee_emails(attendees)
-            if attendee_emails:
-                success = send_meeting_notification(attendee_emails, meeting_data, 'summary')
-                if success:
-                    # تحديث حالة الاجتماع إلى مكتملة
-                    cursor.execute('UPDATE meetings SET status = ? WHERE id = ?', ('مكتملة', meeting_id))
-                    conn.commit()
-                    conn.close()
-                    return jsonify({'success': True, 'message': 'تم إرسال ملخص الاجتماع بنجاح'})
-                else:
-                    conn.close()
-                    return jsonify({'success': False, 'message': 'فشل في إرسال الملخص'})
-            else:
-                conn.close()
-                return jsonify({'success': False, 'message': 'لا توجد عناوين بريد إلكتروني للحضور'})
-        else:
-            conn.close()
-            return jsonify({'success': False, 'message': 'لا يوجد حضور مسجل للاجتماع'})
-            
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-# Change password
-@app.route('/api/change-password', methods=['POST'])
-@login_required
-def change_password():
-    try:
-        current_password = request.form.get('current_password')
-        new_password = request.form.get('new_password')
-        
-        conn = sqlite3.connect('rivaq.db')
-        cursor = conn.cursor()
-        
-        # Verify current password
-        cursor.execute('SELECT password FROM users WHERE id = ?', (session['user_id'],))
-        user = cursor.fetchone()
-        
-        if not user or not check_password_hash(user[0], current_password):
-            return jsonify({'success': False, 'message': 'كلمة المرور الحالية غير صحيحة'})
-        
-        # Update password
-        hashed_password = generate_password_hash(new_password)
-        cursor.execute('UPDATE users SET password = ? WHERE id = ?', 
-                      (hashed_password, session['user_id']))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'message': 'تم تغيير كلمة المرور بنجاح'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-if __name__ == '__main__':
-    init_db()
-    # For development only - remove in production
-    # Production deployment uses gunicorn via Procfile
-    app.run(host='0.0.0.0', port=5007, debug=False)
-
-
-
-if __name__ == "__main__":
-    app.run(debug=True)
+@app.route('/api/profile
