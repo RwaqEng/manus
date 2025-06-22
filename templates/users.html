@@ -49,19 +49,24 @@
 <th style="color: white; background-color: #b78b1e;">الإجراءات</th>
 </tr>
 </thead>
+
 <tbody>
     {% for user in users %}
     <tr>
-<td>{{ user.name }}</td>
-<td>{{ user.email }}</td>
-<td>{{ user.role }}</td>
-<td>
-<a class="edit-btn" data-id="{{ user.id }}" href="#">Edit</a> |
-            <a class="delete-btn" data-id="{{ user.id }}" href="#">Delete</a>
-</td>
-</tr>
+        <td>{{ user.name }}</td>
+        <td>{{ user.email }}</td>
+        <td>{{ user.position }}</td>
+        <td>{{ user.department }}</td>
+        <td>{{ user.join_date }}</td>
+        <td>{{ user.manager_name or "لا يوجد" }}</td>
+        <td>
+            <a class="edit-btn" href="#" onclick="editUser({{ user.id }})">Edit</a> |
+            <a class="delete-btn" href="#" onclick="deleteUser({{ user.id }})">Delete</a>
+        </td>
+    </tr>
     {% endfor %}
 </tbody>
+
 </table>
 </div>
 </div>
