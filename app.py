@@ -855,4 +855,29 @@ def delete_user(user_id):
     
     return jsonify({'success': True, 'message': 'تم حذف المستخدم بنجاح'})
 
-@app.route('/api/profile')
+@app.route('/api/profile', methods=['PUT'])
+@login_required
+def update_profile():
+    try:
+        name = request.form.get('name')
+        position = request.form.get('position')
+        department = request.form.get('department')
+        join_date = request.form.get('join_date')
+        manager_id = request.form.get('manager_id')
+        conn = sqlite3.connect('rivaq.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE users 
+            SET name=?, position=?, department=?, join_date=?, manager_id=?
+            WHERE id=?
+        ''', (name, position, department, join_date, manager_id if manager_id else None, session['user_id']))
+        if cursor.rowcount == 0:
+            return jsonify({'success': False, 'message': 'المستخدم غير موجود'})
+        session['user_name'] = name
+        session['user_position'] = position
+        session['user_department'] = department
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'تم تحديث الملف الشخصي بنجاح'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
