@@ -1,53 +1,67 @@
 
 <!-- users.html -->
-<div class="modal-content">
-    <div class="modal-header">
-        <h5 class="modal-title">تعديل المستخدم</h5>
-        <button type="button" class="close" data-dismiss="modal">&times;</button>
-    </div>
-    <div class="modal-body">
-        <form method="post" id="editUserForm">
-            <input type="hidden" id="editUserId">
-            <div class="form-group">
-                <label for="editName">الاسم</label>
-                <input type="text" class="form-control" id="editName" required>
-            </div>
-            <div class="form-group">
-                <label for="editEmail">البريد الإلكتروني</label>
-                <input type="email" class="form-control" id="editEmail" required>
-            </div>
-            <div class="form-group">
-                <label for="editDepartment">القسم</label>
-                <select class="form-control" id="editDepartment" required>
-                    <option value="الإدارة العليا">الإدارة العليا</option>
-                    <option value="قسم التسويق">قسم التسويق</option>
-                    <option value="القسم الفني">القسم الفني</option>
-                    <option value="قسم المساحة">قسم المساحة</option>
-                    <option value="إدارة المشاريع">إدارة المشاريع</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="editPosition">المنصب</label>
-                <input type="text" class="form-control" id="editPosition" required>
-            </div>
-            <div class="form-group">
-                <label for="editJoinDate">تاريخ الانضمام</label>
-                <input type="date" class="form-control" id="editJoinDate" required>
-            </div>
-            <div class="form-group">
-                <label for="editManager">المدير المباشر</label>
-                <select class="form-control" id="editManager">
-                    <option value="">لا يوجد مدير مباشر</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="editPassword">كلمة المرور</label>
-                <input type="password" class="form-control" id="editPassword">
-            </div>
-            <div class="modal-footer">
-                <button type="submit" class="btn btn-primary">تحديث المستخدم</button>
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">إلغاء</button>
-            </div>
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <title>إدارة المستخدمين</title>
+</head>
+<body>
+    <h1>إدارة المستخدمين</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>الاسم</th>
+                <th>البريد الإلكتروني</th>
+                <th>القسم</th>
+                <th>المدير المباشر</th>
+                <th>الإجراءات</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.name }}</td>
+                <td>{{ user.email }}</td>
+                <td>{{ user.department }}</td>
+                <td>
+                    {% if user.manager %}
+                        {{ user.manager.name }}
+                    {% else %}
+                        غير محدد
+                    {% endif %}
+                </td>
+                <td>
+                    <button onclick="editUser({{ user.id }})">تعديل</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <!-- Modal -->
+    <div id="editUserModal" style="display:none;">
+        <form action="/update_user" method="POST">
+            <input type="hidden" name="id" id="edit-id">
+            <label>الاسم:</label>
+            <input type="text" name="name" id="edit-name"><br>
+            <label>البريد الإلكتروني:</label>
+            <input type="email" name="email" id="edit-email"><br>
+            <label>القسم:</label>
+            <input type="text" name="department" id="edit-department"><br>
+            <label>المدير المباشر:</label>
+            <select name="manager_id" id="edit-manager">
+                <option value="">لا يوجد مدير مباشر</option>
+                {% for manager in managers %}
+                    <option value="{{ manager.id }}">{{ manager.name }}</option>
+                {% endfor %}
+            </select><br>
+            <label>تاريخ الانضمام:</label>
+            <input type="date" name="joining_date" id="edit-joining-date"><br>
+            <label>كلمة المرور:</label>
+            <input type="password" name="password" id="edit-password"><br>
+            <button type="submit">تحديث المستخدم</button>
         </form>
     </div>
-</div>
+</body>
+</html>
