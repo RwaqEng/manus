@@ -1,3 +1,4 @@
+
 {% extends "base.html" %}
 
 {% block title %}تسجيل الدخول - نظام إدارة المهام - شركة رِواق{% endblock %}
@@ -15,7 +16,7 @@
                             <h4 style="color: #b78b1e; font-weight: bold;">شركة رِواق للاستشارات الهندسية</h4>
                             <p style="color: #121617;">نظام إدارة المهام</p>
                         </div>
-                        
+
                         <!-- Login Form -->
                         <form method="POST">
                             <div class="mb-3">
@@ -23,17 +24,17 @@
                                 <input type="email" class="form-control" id="email" name="email" required 
                                        style="border-radius: 10px; border: 2px solid #e9ecef;">
                             </div>
-                            
+
                             <div class="mb-4">
                                 <label for="password" class="form-label" style="color: #121617;">كلمة المرور</label>
                                 <input type="password" class="form-control" id="password" name="password" required 
                                        style="border-radius: 10px; border: 2px solid #e9ecef;">
                             </div>
-                            
+
                             <button type="submit" class="btn btn-primary w-100" style="border-radius: 10px; padding: 12px; font-weight: bold;">
                                 تسجيل الدخول
                             </button>
-                            
+
                             <div class="text-center mt-3">
                                 <a href="{{ url_for('forgot_password') }}" 
                                    class="text-decoration-none" 
@@ -41,17 +42,12 @@
                                     نسيت كلمة المرور؟
                                 </a>
                             </div>
-                        </form>
-                        
-                        <!-- Demo Accounts -->
-                        <div class="mt-4">
-                            <small class="text-muted">حسابات تجريبية:</small>
-                            <div class="mt-2">
-                                <small class="d-block"><strong>majed@rwaqeng.com</strong> / Maj@100200300</small>
-                                <small class="d-block"><strong>asala.alsaaf@rwaqeng.com</strong> / 100200300@Aasala</small>
-                                <small class="d-block"><strong>muhanad.bk@rwaqeng.com</strong> / Muh@100200300</small>
+
+                            <!-- Login Note -->
+                            <div class="text-center mt-4">
+                                <small class="text-muted">يرجى تسجيل الدخول بالبريد الإلكتروني وكلمة المرور الخاصة بالشركة</small>
                             </div>
-                        </div>
+                        </form>
                     </div>
                 </div>
             </div>
@@ -59,4 +55,3 @@
     </div>
 </div>
 {% endblock %}
-
