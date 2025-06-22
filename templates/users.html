@@ -51,7 +51,19 @@
 </thead>
 
 <tbody>
+    
     {% for user in users %}
+    <tr>
+        <td>{{ user.name }}</td>
+        <td>{{ user.email }}</td>
+        <td>{{ user.role_name }}</td>
+        <td>{{ user.manager_name if user.manager_name else '-' }}</td>
+        <td>
+            <a href="/edit_user/{{ user.id }}" class="btn btn-sm btn-primary">تعديل</a>
+            <a href="#" onclick="confirmDelete({{ user.id }})" class="btn btn-sm btn-danger">حذف</a>
+        </td>
+    </tr>
+    
     <tr>
         <td>{{ user.name }}</td>
         <td>{{ user.email }}</td>
