@@ -1,6 +1,32 @@
 {% extends "base.html" %}
 
-{% block title %}الملف الشخصي - نظام إدارة المهام - شركة رِواق{% endblock %}
+{% block title %}الملف الشخصي - نظام إدارة المهام - شركة رِواق
+<script>
+document.querySelectorAll('#editMode input, #editMode select').forEach(field => {
+    field.addEventListener('change', () => {
+        const form = document.getElementById('profileForm');
+        const formData = new FormData(form);
+
+        fetch('/api/profile', {
+            method: 'PUT',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                toastr.success('تم حفظ التعديل تلقائيًا');
+            } else {
+                toastr.error('خطأ: ' + data.message);
+            }
+        })
+        .catch(() => {
+            toastr.error('حدث خطأ في الاتصال');
+        });
+    });
+});
+</script>
+
+{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -37,6 +63,32 @@
     display: block;
 }
 </style>
+
+<script>
+document.querySelectorAll('#editMode input, #editMode select').forEach(field => {
+    field.addEventListener('change', () => {
+        const form = document.getElementById('profileForm');
+        const formData = new FormData(form);
+
+        fetch('/api/profile', {
+            method: 'PUT',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                toastr.success('تم حفظ التعديل تلقائيًا');
+            } else {
+                toastr.error('خطأ: ' + data.message);
+            }
+        })
+        .catch(() => {
+            toastr.error('حدث خطأ في الاتصال');
+        });
+    });
+});
+</script>
+
 {% endblock %}
 
 {% block content %}
@@ -305,5 +357,31 @@ function changePassword() {
     });
 }
 </script>
+
+<script>
+document.querySelectorAll('#editMode input, #editMode select').forEach(field => {
+    field.addEventListener('change', () => {
+        const form = document.getElementById('profileForm');
+        const formData = new FormData(form);
+
+        fetch('/api/profile', {
+            method: 'PUT',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                toastr.success('تم حفظ التعديل تلقائيًا');
+            } else {
+                toastr.error('خطأ: ' + data.message);
+            }
+        })
+        .catch(() => {
+            toastr.error('حدث خطأ في الاتصال');
+        });
+    });
+});
+</script>
+
 {% endblock %}
 
