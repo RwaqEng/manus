@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from flask import Blueprint, jsonify, request
 from flask_mail import Message
 from app import db, mail
@@ -25,3 +26,12 @@ def update_profile():
 
     db.session.commit()
     return jsonify({"success": True, "message": "تم حفظ التعديلات بنجاح."})
+=======
+from flask import Blueprint
+
+api_bp = Blueprint('api', __name__)
+
+@api_bp.route('/')
+def api_index():
+    return "Welcome to the Riwaq System API"
+>>>>>>> dfdb57e4b0dd1eb7e289dca880e60daeea19843b

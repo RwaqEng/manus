@@ -85,7 +85,14 @@ if __name__ == "__main__":
     flask_app = create_app()
     _seed_db(flask_app)  # create tables & sample data if DB empty
     flask_app.run(
+<<<<<<< HEAD
         host="0.0.0.0",
         port=5000,
         debug=flask_app.config.get("DEBUG", False)
     )
+=======
+    host="0.0.0.0",
+    port=5000,
+    debug=flask_app.config.get("DEBUG", False)
+)
+>>>>>>> dfdb57e4b0dd1eb7e289dca880e60daeea19843b
