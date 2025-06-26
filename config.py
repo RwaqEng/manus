@@ -6,7 +6,9 @@ class Config:
     
     # Database configuration
     DATABASE_URL = os.environ.get('DATABASE_URL') or 'sqlite:///rivaq.db'
-    
+    SQLALCHEMY_DATABASE_URI = DATABASE_URL
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+
     # Session configuration
     PERMANENT_SESSION_LIFETIME = timedelta(hours=24)
     SESSION_COOKIE_SECURE = True
@@ -46,4 +48,3 @@ config = {
     'production': ProductionConfig,
     'default': DevelopmentConfig
 }
-
