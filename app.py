@@ -1,6 +1,6 @@
 
 from flask import Flask
-from flask_mail import Mail
+from extensions import mail
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
 import os
@@ -10,7 +10,6 @@ load_dotenv()
 
 # Initialize extensions (moved to extensions.py)
 db = SQLAlchemy()
-mail = Mail()
 
 def create_app():
     app = Flask(__name__)
