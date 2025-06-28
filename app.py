@@ -1,31 +1,40 @@
-
-import os
 from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from flask_mail import Mail
+from flask_login import LoginManager
 from dotenv import load_dotenv
+import os
 
-from extensions import db, mail
-from models import User
+from blueprints.users import User  # Corrected import
+
+db = SQLAlchemy()
+migrate = Migrate()
+mail = Mail()
+login_manager = LoginManager()
+
+load_dotenv()
 
 def create_app():
-    # Load environment variables
-    load_dotenv()
-
-    # Initialize Flask app
     app = Flask(__name__)
-    app.config.from_object('config.Config')
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv("DATABASE_URL", "sqlite:///rivaq.db")
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SECRET_KEY'] = os.getenv("SECRET_KEY", "default-secret-key")
 
-    # Initialize extensions
     db.init_app(app)
+    migrate.init_app(app, db)
     mail.init_app(app)
+    login_manager.init_app(app)
 
-    # Sample index route
-    @app.route("/")
-    def index():
-        return "Hello from Riwaq!"
+    from blueprints.auth import auth_bp
+    from blueprints.api import api_bp
 
-    # Register blueprints or add routes here if needed
-    from api import api_bp
+    app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
+
+    @login_manager.user_loader
+    def load_user(user_id):
+        return User.query.get(int(user_id))
 
     return app
 
