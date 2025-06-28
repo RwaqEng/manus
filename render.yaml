@@ -3,4 +3,5 @@ services:
     name: manus
     env: docker
     plan: free
-    region: oregon
+    dockerfilePath: Dockerfile
+    autoDeploy: true
