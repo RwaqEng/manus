@@ -6,8 +6,7 @@ from flask_login import LoginManager
 from dotenv import load_dotenv
 import os
 
-# تصحيح مسارات الاستيراد لتعمل مع بنية rivaq_fixed/
-from rivaq_fixed.blueprints.users import User  # تم تصحيح المسار
+from blueprints.users import User  # Corrected import
 
 db = SQLAlchemy()
 migrate = Migrate()
@@ -39,7 +38,7 @@ def create_app():
     login_manager.login_message = 'يرجى تسجيل الدخول للوصول إلى هذه الصفحة.'
     login_manager.login_message_category = 'info'
 
-    # Import models after db initialization - تصحيح مسارات الاستيراد
+    # Import models after db initialization
     from rivaq_fixed.models import User, Task, Meeting, MeetingOutput
     
     # User loader for Flask-Login
@@ -47,13 +46,13 @@ def create_app():
     def load_user(user_id):
         return User.query.get(int(user_id))
 
-    # Register blueprints - تصحيح مسارات الاستيراد
-    from rivaq_fixed.auth import auth_bp
-    from rivaq_fixed.api import api_bp
-    from rivaq_fixed.dashboard import dashboard_bp
-    from rivaq_fixed.users import users_bp
-    from rivaq_fixed.tasks import tasks_bp
-    from rivaq_fixed.meetings import meetings_bp
+    # Register blueprints
+    from auth import auth_bp
+    from api import api_bp
+    from dashboard import dashboard_bp
+    from users import users_bp
+    from tasks import tasks_bp
+    from meetings import meetings_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp, url_prefix='/api')
@@ -67,14 +66,12 @@ def create_app():
         db.create_all()
         # Initialize database with sample data if empty
         if not User.query.first():
-            from rivaq_fixed.init_db import init_database
+            from init_db import init_database
             init_database(app, db)
 
     return app
 
-# إنشاء instance للتطبيق للاستخدام مع gunicorn
-app = create_app()
-
 if __name__ == "__main__":
+    app = create_app()
     app.run(host='0.0.0.0', port=5000, debug=True)
 

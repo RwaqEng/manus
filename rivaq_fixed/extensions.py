@@ -9,3 +9,8 @@ migrate = Migrate()
 mail = Mail()
 login_manager = LoginManager()
 
+# Configure login manager
+login_manager.login_view = 'auth.login'
+login_manager.login_message = 'يرجى تسجيل الدخول للوصول إلى هذه الصفحة.'
+login_manager.login_message_category = 'info'
+
